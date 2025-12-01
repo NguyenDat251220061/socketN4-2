@@ -83,7 +83,7 @@ class Client:
 		self.label.grid(row=0, column=0, columnspan=4, sticky=W+E+N+S, padx=5, pady=5) 
 
 		self.createSeekBar()
-	    def onSeekStart(self,event=None):
+	def onSeekStart(self,event=None):
         """Seek frame."""
         if not self.isSeeking:
             self.isSeeking=True
@@ -118,22 +118,22 @@ class Client:
 		if self.state == self.PLAYING:
 			self.sendRtspRequest(self.PAUSE)
 	
-	    def playMovie(self):
-        """Play button handler."""
-        if self.state == self.READY:
+	def playMovie(self):
+	"""Play button handler."""
+	if self.state == self.READY:
 
-            self.sendRtspRequest(self.PLAY)
-            # Create a new thread to listen for RTP packets
-            receiving_thread = threading.Thread(target=self.listenRtp)
-            receiving_thread.daemon = True
-            receiving_thread.start()
+		self.sendRtspRequest(self.PLAY)
+		# Create a new thread to listen for RTP packets
+		receiving_thread = threading.Thread(target=self.listenRtp)
+		receiving_thread.daemon = True
+		receiving_thread.start()
 
-            display_thread = threading.Thread(target=self.displayFrames)
-            display_thread.daemon = True
-            display_thread.start()
+		display_thread = threading.Thread(target=self.displayFrames)
+		display_thread.daemon = True
+		display_thread.start()
 
-            self.playEvent = threading.Event()
-            self.playEvent.clear()
+		self.playEvent = threading.Event()
+		self.playEvent.clear()
 
 
 
@@ -367,4 +367,5 @@ class Client:
 			self.exitClient()
 		else: # When the user presses cancel, resume playing.
 			self.playMovie()
+
 
