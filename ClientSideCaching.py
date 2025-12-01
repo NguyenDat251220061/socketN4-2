@@ -6,9 +6,7 @@ from PIL import Image
 class ClientSideCaching:
     def __init__(self):
         self.buffer = {}
-        self.accessCounter = 0
-        self.accessOrder = {}
-        self.oldestKey = None
+
 
     def getFrame(self, frameNumber, sessionId):
         key = self.makeKey(frameNumber, sessionId)
