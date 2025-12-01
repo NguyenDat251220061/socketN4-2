@@ -4,7 +4,7 @@ tkinter.messagebox
 from tkinter import messagebox 
 tkinter.messagebox
 from PIL import Image, ImageTk
-import socket, threading, sys, traceback, os
+import socket, threading, sys, traceback, os, time
 
 from RtpPacket import RtpPacket
 
@@ -47,7 +47,11 @@ class Client:
 		self.teardownAcked = 0
 		self.connectToServer()
 		self.frameNbr = 0
-		
+		self.cache=ClientSideCaching()
+        self.targetFrames=50
+        self.cachedFrames=0
+        self.isSeeking=False
+	
 	def createWidgets(self):
 		"""Build GUI."""
 		# Create Setup button
@@ -77,7 +81,27 @@ class Client:
 		# Create a label to display the movie
 		self.label = Label(self.master, height=19)
 		self.label.grid(row=0, column=0, columnspan=4, sticky=W+E+N+S, padx=5, pady=5) 
-	
+
+		self.createSeekBar()
+	    def onSeekStart(self,event=None):
+        """Seek frame."""
+        if not self.isSeeking:
+            self.isSeeking=True
+            self.pauseMovie()
+
+    def onSeekEnd(self,event=None):
+        if self.isSeeking and self.state == self.READY:
+            self.isSeeking=False
+            self.playMovie()
+
+    def onSeeking(self,event=None):
+        self.frameNbr=self.seekBar.get()
+        print("frameNbr:",self.frameNbr)
+        dataFrame=self.cache.getFrame(self.frameNbr,self.sessionId)
+
+        if dataFrame:
+            self.updateMovie(self.writeFrame(dataFrame))
+			
 	def setupMovie(self):
 		"""Setup button handler."""
 		if self.state == self.INIT:
@@ -94,42 +118,76 @@ class Client:
 		if self.state == self.PLAYING:
 			self.sendRtspRequest(self.PAUSE)
 	
-	def playMovie(self):
-		"""Play button handler."""
-		if self.state == self.READY:
-			# Create a new thread to listen for RTP packets
-			threading.Thread(target=self.listenRtp).start()
-			self.playEvent = threading.Event()
-			self.playEvent.clear()
-			self.sendRtspRequest(self.PLAY)
-	
-	def listenRtp(self):		
-		"""Listen for RTP packets."""
-		while True:
-			try:
-				print("LISTENING...")
-				data = self.rtpSocket.recv(20480)
-				if data:
-					rtpPacket = RtpPacket()
-					rtpPacket.decode(data)
-					
-					currFrameNbr = rtpPacket.seqNum()
-					print ("CURRENT SEQUENCE NUM: " + str(currFrameNbr))
-										
-					if currFrameNbr > self.frameNbr: # Discard the late packet
-						self.frameNbr = currFrameNbr
-						self.updateMovie(self.writeFrame(rtpPacket.getPayload()))
-			except:
-				# Stop listening upon requesting PAUSE or TEARDOWN
-				if self.playEvent.isSet(): 
-					break
-				
-				# Upon receiving ACK for TEARDOWN request,
-				# close the RTP socket
-				if self.teardownAcked == 1:
-					self.rtpSocket.shutdown(socket.SHUT_RDWR)
-					self.rtpSocket.close()
-					break
+	    def playMovie(self):
+        """Play button handler."""
+        if self.state == self.READY:
+
+            self.sendRtspRequest(self.PLAY)
+            # Create a new thread to listen for RTP packets
+            receiving_thread = threading.Thread(target=self.listenRtp)
+            receiving_thread.daemon = True
+            receiving_thread.start()
+
+            display_thread = threading.Thread(target=self.displayFrames)
+            display_thread.daemon = True
+            display_thread.start()
+
+            self.playEvent = threading.Event()
+            self.playEvent.clear()
+
+
+
+    def listenRtp(self):
+        """Listen for RTP packets."""
+        while True:
+            try:
+                print("LISTENING...")
+                data = self.rtpSocket.recv(20480)
+                if data:
+                    rtpPacket = RtpPacket()
+                    rtpPacket.decode(data)
+
+                    currFrameNbr = rtpPacket.seqNum()
+                    print("CURRENT SEQUENCE NUM: " + str(currFrameNbr))
+
+                    dataFrame=rtpPacket.getPayload()
+                    if dataFrame:
+                        print(f"Cached frame {currFrameNbr}")
+                        self.cache.cacheFrame(currFrameNbr,self.sessionId,dataFrame)
+                        self.cachedFrames+=1
+
+            except:
+                # Stop listening upon requesting PAUSE or TEARDOWN
+                if self.playEvent.isSet():
+                    break
+
+                # Upon receiving ACK for TEARDOWN request,
+                # close the RTP socket
+                if self.teardownAcked == 1:
+                    self.rtpSocket.shutdown(socket.SHUT_RDWR)
+                    self.rtpSocket.close()
+                    break
+
+    def displayFrames(self):
+        """Display frame."""
+        print("State ",self.state)
+        while self.cachedFrames<self.targetFrames:
+            time.sleep(0.01)
+
+        while self.state==self.PLAYING:
+            nextFrame=self.frameNbr+1
+            dataFrame=self.cache.getFrame(nextFrame,self.sessionId)
+
+            if dataFrame:
+                self.frameNbr=nextFrame
+                self.updateMovie(self.writeFrame(dataFrame))
+
+                self.seekBar.set(self.frameNbr)
+            else:
+                time.sleep(0.05)
+
+            time.sleep(0.033)
+
 					
 	def writeFrame(self, data):
 		"""Write the received frame to a temp image file. Return the image file."""
@@ -309,3 +367,4 @@ class Client:
 			self.exitClient()
 		else: # When the user presses cancel, resume playing.
 			self.playMovie()
+
